@@ -350,15 +350,48 @@
   // ================================================================
   const keys = { left: false, right: false, brake: false };
 
+  // ================================================================
+  // マップビュー状態
+  // ================================================================
+  const mapView = {
+    active:       false,
+    x:            0,
+    z:            0,
+    height:       280,   // カメラ高度 (m) — ズームレベルに対応
+    MIN_HEIGHT:   30,
+    MAX_HEIGHT:   800,
+    mv:           { up: false, down: false, left: false, right: false },
+    drag:         null,  // { sx, sz, mx, mz } — ドラッグ開始時の状態
+    lastPinchDist: 0,
+  };
+
   document.addEventListener('keydown', e => {
-    if (e.key === 'ArrowLeft')                           keys.left  = true;
-    if (e.key === 'ArrowRight')                          keys.right = true;
-    if (e.key === 'ArrowDown' || e.key === ' ')          keys.brake = true;
+    // --- レース操作 ---
+    if (!mapView.active) {
+      if (e.key === 'ArrowLeft')                  keys.left  = true;
+      if (e.key === 'ArrowRight')                 keys.right = true;
+      if (e.key === 'ArrowDown' || e.key === ' ') keys.brake = true;
+    }
+    // --- マップビュー移動 ---
+    if (mapView.active) {
+      if (e.key === 'ArrowUp'    || e.key === 'w') mapView.mv.up    = true;
+      if (e.key === 'ArrowDown'  || e.key === 's') mapView.mv.down  = true;
+      if (e.key === 'ArrowLeft'  || e.key === 'a') mapView.mv.left  = true;
+      if (e.key === 'ArrowRight' || e.key === 'd') mapView.mv.right = true;
+    }
   });
   document.addEventListener('keyup', e => {
-    if (e.key === 'ArrowLeft')                           keys.left  = false;
-    if (e.key === 'ArrowRight')                          keys.right = false;
-    if (e.key === 'ArrowDown' || e.key === ' ')          keys.brake = false;
+    if (!mapView.active) {
+      if (e.key === 'ArrowLeft')                  keys.left  = false;
+      if (e.key === 'ArrowRight')                 keys.right = false;
+      if (e.key === 'ArrowDown' || e.key === ' ') keys.brake = false;
+    }
+    if (mapView.active) {
+      if (e.key === 'ArrowUp'    || e.key === 'w') mapView.mv.up    = false;
+      if (e.key === 'ArrowDown'  || e.key === 's') mapView.mv.down  = false;
+      if (e.key === 'ArrowLeft'  || e.key === 'a') mapView.mv.left  = false;
+      if (e.key === 'ArrowRight' || e.key === 'd') mapView.mv.right = false;
+    }
   });
 
   function bindBtn(id, key) {
@@ -430,6 +463,120 @@
     document.getElementById('countdown').style.color = '#ffffff';
     gameState = 'start';
     document.getElementById('start-screen').style.display = 'flex';
+  }
+
+  // ================================================================
+  // マップビューモード ON / OFF
+  // ================================================================
+  function enterMapView() {
+    mapView.active = true;
+    mapView.x      = 0;
+    mapView.z      = 0;
+    mapView.height = 280;
+    // キー状態リセット
+    Object.keys(mapView.mv).forEach(k => mapView.mv[k] = false);
+    gameState = 'mapview';
+    document.getElementById('start-screen').style.display  = 'none';
+    document.getElementById('mapview-hud').style.display   = 'flex';
+    // フォグを無効化して全体を見渡せるように
+    scene.fog = null;
+    updateMapCoords();
+  }
+
+  function exitMapView() {
+    mapView.active = false;
+    gameState = 'start';
+    document.getElementById('mapview-hud').style.display  = 'none';
+    document.getElementById('start-screen').style.display = 'flex';
+    // フォグ復元
+    scene.fog = new THREE.FogExp2(0x9fd8e8, 0.003);
+  }
+
+  document.getElementById('mapview-btn').addEventListener('click', enterMapView);
+  document.getElementById('mapview-close-btn').addEventListener('click', exitMapView);
+
+  // ズームボタン
+  document.getElementById('mv-zoom-in').addEventListener('click', () => {
+    mapView.height = Math.max(mapView.MIN_HEIGHT, mapView.height * 0.7);
+    updateMapCoords();
+  });
+  document.getElementById('mv-zoom-out').addEventListener('click', () => {
+    mapView.height = Math.min(mapView.MAX_HEIGHT, mapView.height * 1.4);
+    updateMapCoords();
+  });
+
+  // スクロールホイール ズーム
+  canvas.addEventListener('wheel', e => {
+    if (!mapView.active) return;
+    e.preventDefault();
+    const factor = 1 + e.deltaY * 0.001;
+    mapView.height = Math.max(mapView.MIN_HEIGHT,
+                      Math.min(mapView.MAX_HEIGHT, mapView.height * factor));
+    updateMapCoords();
+  }, { passive: false });
+
+  // マウスドラッグ パン
+  canvas.addEventListener('mousedown', e => {
+    if (!mapView.active) return;
+    mapView.drag = { clientX: e.clientX, clientY: e.clientY, startX: mapView.x, startZ: mapView.z };
+  });
+  canvas.addEventListener('mousemove', e => {
+    if (!mapView.active || !mapView.drag) return;
+    const scale = mapView.height / window.innerHeight * 1.8;
+    mapView.x = mapView.drag.startX - (e.clientX - mapView.drag.clientX) * scale;
+    mapView.z = mapView.drag.startZ - (e.clientY - mapView.drag.clientY) * scale;
+    updateMapCoords();
+  });
+  canvas.addEventListener('mouseup',    () => { mapView.drag = null; });
+  canvas.addEventListener('mouseleave', () => { mapView.drag = null; });
+
+  // タッチドラッグ & ピンチズーム
+  canvas.addEventListener('touchstart', e => {
+    if (!mapView.active) return;
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      mapView.drag = {
+        clientX: e.touches[0].clientX, clientY: e.touches[0].clientY,
+        startX:  mapView.x,            startZ:  mapView.z,
+      };
+    } else if (e.touches.length === 2) {
+      mapView.drag = null;
+      mapView.lastPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+    }
+  }, { passive: false });
+  canvas.addEventListener('touchmove', e => {
+    if (!mapView.active) return;
+    e.preventDefault();
+    if (e.touches.length === 1 && mapView.drag) {
+      const scale = mapView.height / window.innerHeight * 1.8;
+      mapView.x = mapView.drag.startX - (e.touches[0].clientX - mapView.drag.clientX) * scale;
+      mapView.z = mapView.drag.startZ - (e.touches[0].clientY - mapView.drag.clientY) * scale;
+    } else if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      if (mapView.lastPinchDist > 0) {
+        mapView.height *= mapView.lastPinchDist / dist;
+        mapView.height  = Math.max(mapView.MIN_HEIGHT,
+                           Math.min(mapView.MAX_HEIGHT, mapView.height));
+      }
+      mapView.lastPinchDist = dist;
+    }
+    updateMapCoords();
+  }, { passive: false });
+  canvas.addEventListener('touchend', () => { mapView.drag = null; mapView.lastPinchDist = 0; });
+
+  function updateMapCoords() {
+    const o   = MapModule.ORIGIN;
+    const lat = o.lat - mapView.z / 111000;
+    const lng = o.lng + mapView.x / (111000 * Math.cos(o.lat * Math.PI / 180));
+    const zoom = Math.round(300 / mapView.height * 100);
+    document.getElementById('mapview-coords').textContent =
+      `${lat.toFixed(5)}°N  ${lng.toFixed(5)}°E  |  ズーム: ${zoom}%`;
   }
 
   // ================================================================
@@ -513,6 +660,13 @@
   const _lookAt = new THREE.Vector3();
 
   function updateCamera() {
+    if (mapView.active) {
+      // マップビュー: 真上から見下ろす
+      camera.position.set(mapView.x, mapView.height, mapView.z + 0.01);
+      camera.lookAt(mapView.x, 0, mapView.z);
+      return;
+    }
+    // 通常: スムーズ第三者視点
     _camDst.set(
       car.pos.x - Math.sin(car.heading) * 14,
       car.pos.y + 5.5,
@@ -528,12 +682,26 @@
   // ================================================================
   let lastTime = performance.now();
 
+  function updateMapView(dt) {
+    if (!mapView.active) return;
+    // WASD / 矢印キー パン (高度に比例した速度)
+    const speed = mapView.height * 0.65;
+    if (mapView.mv.up)    mapView.z -= speed * dt;
+    if (mapView.mv.down)  mapView.z += speed * dt;
+    if (mapView.mv.left)  mapView.x -= speed * dt;
+    if (mapView.mv.right) mapView.x += speed * dt;
+    if (mapView.mv.up || mapView.mv.down || mapView.mv.left || mapView.mv.right) {
+      updateMapCoords();
+    }
+  }
+
   function animate() {
     requestAnimationFrame(animate);
     const now = performance.now();
     const dt  = Math.min((now - lastTime) / 1000, 0.05);
     lastTime  = now;
     update(dt);
+    updateMapView(dt);
     updateCamera();
     renderer.render(scene, camera);
   }

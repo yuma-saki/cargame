@@ -60,10 +60,27 @@
         <span>ハンドリング</span><span class="stars">★★★☆☆</span>
       </div>
       <button id="start-btn">スタート</button>
+      <button id="mapview-btn">🗺 マップを見る</button>
       <div class="controls-hint">
         <p>キーボード: ← → ステアリング &nbsp;|&nbsp; ブレーキ: ↓ / Space</p>
         <p>モバイル: 画面のバーチャルボタン</p>
       </div>
+    </div>
+  </div>
+
+  <!-- Map View HUD -->
+  <div id="mapview-hud" style="display:none">
+    <div id="mapview-header">
+      <div id="mapview-badge">🗺 マップビューモード <span class="dev-tag">DEV</span></div>
+      <div id="mapview-coords"></div>
+    </div>
+    <div id="mapview-zoom-btns">
+      <button id="mv-zoom-in"  class="mv-btn">＋</button>
+      <button id="mv-zoom-out" class="mv-btn">－</button>
+    </div>
+    <div id="mapview-footer">
+      <div class="mapview-hint">WASD / 矢印: 移動 &nbsp;|&nbsp; スクロール / ピンチ: ズーム</div>
+      <button id="mapview-close-btn">✕ ゲームに戻る</button>
     </div>
   </div>
 
