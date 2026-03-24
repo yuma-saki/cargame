@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>リアルカーレース - プロトタイプ</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="hud-top">
+      <div id="lap-info">LAP <span id="lap">1</span> / 3</div>
+      <div id="timer-display">
+        <div id="current-time">00:00.000</div>
+        <div id="best-time">BEST: --:--.---</div>
+      </div>
+    </div>
+  </div>
+  <div id="speedometer">
+    <span id="speed">0</span>
+    <span id="speed-unit">km/h</span>
+  </div>
+
+  <!-- Virtual Controls -->
+  <div id="controls">
+    <div id="controls-left">
+      <button id="btn-left" class="ctrl-btn">&#9664;</button>
+      <button id="btn-right" class="ctrl-btn">&#9654;</button>
+    </div>
+    <div id="controls-right">
+      <button id="btn-brake" class="ctrl-btn brake-btn">BRAKE</button>
+    </div>
+  </div>
+
+  <!-- Start Screen -->
+  <div id="start-screen">
+    <div id="start-content">
+      <div class="game-title">リアルカーレース</div>
+      <div class="game-subtitle">西原町コース — プロトタイプ</div>
+      <div class="car-badge">
+        <span class="car-label">使用車両</span>
+        <span class="car-name">ブリーザー C</span>
+      </div>
+      <div class="stat-row">
+        <span>速度</span><span class="stars">★★★☆☆</span>
+        <span>加速</span><span class="stars">★★★☆☆</span>
+        <span>ハンドリング</span><span class="stars">★★★☆☆</span>
+      </div>
+      <button id="start-btn">スタート</button>
+      <div class="controls-hint">
+        <p>キーボード: ← → ステアリング &nbsp;|&nbsp; ブレーキ: ↓ / Space</p>
+        <p>モバイル: 画面のバーチャルボタン</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Countdown -->
+  <div id="countdown" style="display:none"></div>
+
+  <!-- Finish Screen -->
+  <div id="finish-screen" style="display:none">
+    <div id="finish-content">
+      <div class="finish-title">ゴール！</div>
+      <div id="finish-total"></div>
+      <div id="finish-best"></div>
+      <div id="finish-laps"></div>
+      <button id="retry-btn">もう一度</button>
+    </div>
+  </div>
+
+  <canvas id="game-canvas"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
