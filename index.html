@@ -8,6 +8,17 @@
 </head>
 <body>
 
+  <!-- Loading Screen (最初に表示) -->
+  <div id="loading-screen">
+    <div id="loading-content">
+      <div class="loading-title">リアルカーレース</div>
+      <div class="loading-subtitle">西原町コース — プロトタイプ</div>
+      <div class="loading-spinner"></div>
+      <div id="loading-msg">初期化中...</div>
+      <div class="loading-note">© OpenStreetMap contributors</div>
+    </div>
+  </div>
+
   <!-- HUD -->
   <div id="hud">
     <div id="hud-top">
@@ -26,7 +37,7 @@
   <!-- Virtual Controls -->
   <div id="controls">
     <div id="controls-left">
-      <button id="btn-left" class="ctrl-btn">&#9664;</button>
+      <button id="btn-left"  class="ctrl-btn">&#9664;</button>
       <button id="btn-right" class="ctrl-btn">&#9654;</button>
     </div>
     <div id="controls-right">
@@ -34,11 +45,11 @@
     </div>
   </div>
 
-  <!-- Start Screen -->
-  <div id="start-screen">
+  <!-- Start Screen (loading 後に表示) -->
+  <div id="start-screen" style="display:none">
     <div id="start-content">
       <div class="game-title">リアルカーレース</div>
-      <div class="game-subtitle">西原町コース — プロトタイプ</div>
+      <div class="game-subtitle">コース 1 — 西原マリンパーク 港周回</div>
       <div class="car-badge">
         <span class="car-label">使用車両</span>
         <span class="car-name">ブリーザー C</span>
@@ -73,6 +84,7 @@
   <canvas id="game-canvas"></canvas>
 
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="map.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

@@ -159,6 +159,68 @@ body {
   background: rgba(220,60,60,0.75);
 }
 
+/* ===== LOADING SCREEN ===== */
+#loading-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, #020b18 0%, #041a36 100%);
+  z-index: 30;
+}
+
+#loading-content {
+  text-align: center;
+  color: #fff;
+  padding: 0 24px;
+}
+
+.loading-title {
+  font-size: 36px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  background: linear-gradient(135deg, #66aaff, #0044ff, #00ccff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 6px;
+}
+
+.loading-subtitle {
+  font-size: 14px;
+  color: #556688;
+  letter-spacing: 1px;
+  margin-bottom: 40px;
+}
+
+.loading-spinner {
+  width: 52px;
+  height: 52px;
+  border: 4px solid rgba(100, 160, 255, 0.2);
+  border-top-color: #4488ff;
+  border-radius: 50%;
+  margin: 0 auto 20px;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+#loading-msg {
+  font-size: 14px;
+  color: #7799bb;
+  min-height: 20px;
+  letter-spacing: 0.5px;
+}
+
+.loading-note {
+  font-size: 11px;
+  color: #334455;
+  margin-top: 32px;
+}
+
 /* ===== START SCREEN ===== */
 #start-screen {
   position: fixed;
