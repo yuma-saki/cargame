@@ -131,6 +131,7 @@ const MapModule = (function () {
       const label = url.split('/').slice(-4, -1).join('/');
       try {
         if (onProgress) onProgress(`PLATEAU データ取得中: ${label}…`);
+        if (window.debugLog) window.debugLog('PLATEAU', `試行: ${label}`, 'info');
 
         const tr = new TilesRenderer(url);
 
@@ -166,10 +167,12 @@ const MapModule = (function () {
         ]);
 
         console.log('[PLATEAU] 読み込み成功:', url);
+        if (window.debugLog) window.debugLog('PLATEAU', `✓ tileset.json 取得: ${label}`, 'ok');
         return tr; // 成功したらリターン
 
       } catch (e) {
         console.warn('[PLATEAU] 失敗:', label, '—', e.message);
+        if (window.debugLog) window.debugLog('PLATEAU', `✗ ${label} — ${e.message}`, 'error');
         errors.push(`${label}: ${e.message}`);
       }
     }
@@ -224,6 +227,7 @@ const MapModule = (function () {
       else if (el.type === 'way') ways.push(el);
     });
 
+    const typeCounts = {};
     let count = 0;
     ways.forEach(way => {
       const tags = way.tags || {};
@@ -233,9 +237,17 @@ const MapModule = (function () {
         .map(n => project(n.lat, n.lon));
       if (pts.length < 2) return;
       _buildRoadMesh(scene, pts, ROAD_WIDTHS[tags.highway] || 5, ROAD_COLORS[tags.highway] || 0x404040);
+      typeCounts[tags.highway] = (typeCounts[tags.highway] || 0) + 1;
       count++;
     });
     console.log('[OSM Roads] 道路描画:', count, '本');
+    if (window.debugLog) {
+      window.debugLog('OSM', `道路メッシュ生成: 計 ${count} 本`, 'ok');
+      const top = Object.entries(typeCounts)
+        .sort((a, b) => b[1] - a[1]).slice(0, 5)
+        .map(([t, n]) => `${t}:${n}`).join('  ');
+      if (top) window.debugLog('OSM', `内訳 → ${top}`, 'info');
+    }
   }
 
   function _buildRoadMesh(scene, pts, width, color) {

@@ -18,6 +18,56 @@
   }
 
   // ================================================================
+  // デバッグログ (画面左下 / L キーで表示切替)
+  // ================================================================
+  const _dbgPanel   = document.getElementById('debug-log');
+  const _dbgEntries = document.getElementById('debug-entries');
+  const _dbgHint    = document.getElementById('debug-hint');
+  const _dbgStart   = performance.now();
+
+  /** @param {'info'|'ok'|'warn'|'error'} type */
+  function debugLog(tag, msg, type) {
+    type = type || 'info';
+    const elapsed = ((performance.now() - _dbgStart) / 1000).toFixed(2);
+
+    // console にも出力
+    const fn = type === 'error' ? console.error : type === 'warn' ? console.warn : console.log;
+    fn(`[${tag}]`, msg);
+
+    if (!_dbgEntries) return;
+    const row = document.createElement('div');
+    row.className = `de de-${type}`;
+    row.innerHTML =
+      `<span class="de-ts">+${elapsed}s</span>` +
+      `<span class="de-tag">[${tag}]</span>` +
+      `<span class="de-msg">${String(msg).replace(/</g, '&lt;')}</span>`;
+    _dbgEntries.appendChild(row);
+    // 最大 60 行まで保持
+    while (_dbgEntries.children.length > 60) _dbgEntries.removeChild(_dbgEntries.firstChild);
+    _dbgEntries.scrollTop = _dbgEntries.scrollHeight;
+  }
+  window.debugLog = debugLog; // map.js からも呼べるようにグローバル公開
+
+  // ステータスバッジ更新
+  function _setStatus(id, label, type) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = label;
+    el.className   = `ds-badge ds-${type}`;
+  }
+
+  // L キー / ✕ ボタンで表示切替
+  function _toggleDebug(show) {
+    const visible = (show !== undefined) ? show : (_dbgPanel.style.display === 'none');
+    _dbgPanel.style.display = visible ? 'block' : 'none';
+    if (_dbgHint) _dbgHint.style.display = visible ? 'none' : '';
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key === 'l' || e.key === 'L') _toggleDebug();
+  });
+  document.getElementById('debug-close').addEventListener('click', () => _toggleDebug(false));
+
+  // ================================================================
   // THREE.js シーン
   // ================================================================
   const canvas   = document.getElementById('game-canvas');
@@ -714,29 +764,47 @@
   let _plateauRenderer = null; // レンダーループで update() するために保持
 
   async function init() {
+    // ロード開始時にデバッグパネルを自動で開く
+    _toggleDebug(true);
+
+    const TilesLib = window.TilesRenderers;
+    if (TilesLib && TilesLib.TilesRenderer) {
+      debugLog('3DTiles', `ライブラリ読み込み OK (v${TilesLib.VERSION || '?'})`, 'ok');
+    } else {
+      debugLog('3DTiles', '未ロード — PLATEAU は利用不可', 'error');
+    }
 
     // 1. PLATEAU 建物 3D Tiles
     try {
       setLoading('PLATEAU データを検索中…');
+      debugLog('PLATEAU', '建物タイル取得開始', 'info');
       _plateauRenderer = await MapModule.loadPLATEAUBuildings(
         scene, camera, renderer, setLoading,
       );
+      debugLog('PLATEAU', '建物タイル読み込み成功', 'ok');
+      _setStatus('debug-status-plateau', 'PLATEAU: ✓', 'ok');
     } catch (err) {
-      console.warn('[PLATEAU] 建物データ取得失敗:', err.message);
+      debugLog('PLATEAU', `全ソース失敗 — ${err.message}`, 'error');
+      _setStatus('debug-status-plateau', 'PLATEAU: ✗', 'fail');
       setLoading('PLATEAU 取得失敗 — フォールバック中…');
-      // PLATEAU なしで続行（道路のみでもゲームは動く）
     }
 
-    // 2. OSM 道路データ (暫定 / 将来 PLATEAU 交通モデルへ移行)
+    // 2. OSM 道路データ
     try {
       setLoading('道路データを取得中 (OpenStreetMap)…');
+      debugLog('OSM', '道路データ取得開始 (Overpass API)', 'info');
       const roadData = await MapModule.fetchRoadData(setLoading);
+      const wayCount = roadData.elements.filter(e => e.type === 'way').length;
+      debugLog('OSM', `取得完了 — way: ${wayCount} 件`, 'ok');
       MapModule.buildRoads(scene, roadData, setLoading);
+      _setStatus('debug-status-osm', 'OSM: ✓', 'ok');
     } catch (err) {
-      console.warn('[OSM] 道路データ取得失敗:', err.message);
+      debugLog('OSM', `取得失敗 — ${err.message}`, 'error');
+      _setStatus('debug-status-osm', 'OSM: ✗', 'fail');
       buildFallbackEnvironment();
     }
 
+    debugLog('SYSTEM', '初期化完了', 'ok');
     hideLoading();
     animate();
   }
