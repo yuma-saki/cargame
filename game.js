@@ -753,34 +753,28 @@
     update(dt);
     updateMapView(dt);
     updateCamera();
-    // PLATEAU タイル LOD 更新（カメラ距離に応じてタイルを切替）
-    if (_plateauRenderer) _plateauRenderer.update();
+    // (PLATEAU タイル更新は GLTFLoader 実装では不要)
     renderer.render(scene, camera);
   }
 
   // ================================================================
   // 非同期初期化 — PLATEAU 建物 + OSM 道路
   // ================================================================
-  let _plateauRenderer = null; // レンダーループで update() するために保持
-
   async function init() {
     // ロード開始時にデバッグパネルを自動で開く
     _toggleDebug(true);
 
-    const TilesLib = window.TilesRenderers;
-    if (TilesLib && TilesLib.TilesRenderer) {
-      debugLog('3DTiles', `ライブラリ読み込み OK (v${TilesLib.VERSION || '?'})`, 'ok');
+    if (window.THREE && window.THREE.GLTFLoader) {
+      debugLog('GLTFLoader', '読み込み OK', 'ok');
     } else {
-      debugLog('3DTiles', '未ロード — PLATEAU は利用不可', 'error');
+      debugLog('GLTFLoader', '未ロード — PLATEAU は利用不可', 'error');
     }
 
     // 1. PLATEAU 建物 3D Tiles
     try {
       setLoading('PLATEAU データを検索中…');
       debugLog('PLATEAU', '建物タイル取得開始', 'info');
-      _plateauRenderer = await MapModule.loadPLATEAUBuildings(
-        scene, camera, renderer, setLoading,
-      );
+      await MapModule.loadPLATEAUBuildings(scene, camera, renderer, setLoading);
       debugLog('PLATEAU', '建物タイル読み込み成功', 'ok');
       _setStatus('debug-status-plateau', 'PLATEAU: ✓', 'ok');
     } catch (err) {

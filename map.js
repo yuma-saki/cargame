@@ -114,61 +114,161 @@ const MapModule = (function () {
   }
 
   // ================================================================
-  // PLATEAU 建物 3D Tiles 読み込み
+  // PLATEAU 建物 3D Tiles 読み込み (Three.js GLTFLoader による自前実装)
   // ================================================================
-  async function loadPLATEAUBuildings(scene, camera, renderer, onProgress) {
-    // 3d-tiles-renderer UMD ビルドが window.TilesRenderers を公開
-    const TilesLib = window.TilesRenderers;
-    if (!TilesLib || !TilesLib.TilesRenderer) {
-      throw new Error('3d-tiles-renderer ライブラリが読み込まれていません');
-    }
-    const { TilesRenderer, GLTFExtensionsPlugin } = TilesLib;
 
+  /**
+   * tileset.json ツリーを走査してコンテンツ URL とタイル変換行列を収集する。
+   * depth > maxDepth に達したら子を無視（ブラウザ負荷軽減）。
+   */
+  function _collectTiles(tile, baseUrl, parentTransform, out, depth, maxDepth) {
+    const tileMatrix = tile.transform
+      ? new THREE.Matrix4().fromArray(tile.transform)
+      : new THREE.Matrix4();
+    const worldMatrix = parentTransform.clone().multiply(tileMatrix);
+
+    if (tile.content && tile.content.uri) {
+      const tileUrl = new URL(tile.content.uri, baseUrl).href;
+      out.push({ url: tileUrl, transform: worldMatrix.clone() });
+    }
+    if (depth < maxDepth && Array.isArray(tile.children)) {
+      tile.children.forEach(c =>
+        _collectTiles(c, baseUrl, worldMatrix, out, depth + 1, maxDepth),
+      );
+    }
+  }
+
+  /**
+   * B3DM バッファを解析して Three.js Object3D を返す。
+   * B3DM ヘッダ (28 バイト):
+   *   [0..3]   magic "b3dm"
+   *   [4..7]   version
+   *   [8..11]  byteLength
+   *   [12..15] featureTableJSONByteLength
+   *   [16..19] featureTableBinaryByteLength
+   *   [20..23] batchTableJSONByteLength
+   *   [24..27] batchTableBinaryByteLength
+   *   [28..]   featureTableJSON | featureTableBinary | batchTableJSON | batchTableBinary | GLB
+   */
+  function _parseB3DM(buffer, gltfLoader) {
+    const view      = new DataView(buffer);
+    const ftJSONLen = view.getUint32(12, true);
+    const ftBinLen  = view.getUint32(16, true);
+    const btJSONLen = view.getUint32(20, true);
+    const btBinLen  = view.getUint32(24, true);
+
+    // RTC_CENTER 抽出（タイル内 GLB 頂点の相対中心）
+    let rtcMatrix = null;
+    if (ftJSONLen > 0) {
+      try {
+        const ftText = new TextDecoder().decode(new Uint8Array(buffer, 28, ftJSONLen));
+        const ftJSON = JSON.parse(ftText);
+        if (Array.isArray(ftJSON.RTC_CENTER) && ftJSON.RTC_CENTER.length === 3) {
+          const [cx, cy, cz] = ftJSON.RTC_CENTER;
+          rtcMatrix = new THREE.Matrix4().makeTranslation(cx, cy, cz);
+        }
+      } catch (_) { /* JSON パース失敗は無視 */ }
+    }
+
+    const glbStart  = 28 + ftJSONLen + ftBinLen + btJSONLen + btBinLen;
+    const glbBuffer = buffer.slice(glbStart);
+
+    return new Promise((resolve, reject) => {
+      gltfLoader.parse(glbBuffer, '', gltf => {
+        const root = gltf.scene;
+        if (rtcMatrix) root.applyMatrix4(rtcMatrix);
+        resolve(root);
+      }, reject);
+    });
+  }
+
+  /** GLB バッファを直接 GLTFLoader でパースして Object3D を返す */
+  function _parseGLB(buffer, gltfLoader) {
+    return new Promise((resolve, reject) => {
+      gltfLoader.parse(buffer, '', gltf => resolve(gltf.scene), reject);
+    });
+  }
+
+  /**
+   * 単一タイル URL を fetch → B3DM / GLB を解析して Object3D を返す。
+   * 失敗時は null を返す（全体の読み込みを止めない）。
+   */
+  async function _loadTile(url, gltfLoader) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buffer = await res.arrayBuffer();
+
+      const magic = new TextDecoder().decode(new Uint8Array(buffer, 0, 4));
+      if (magic === 'b3dm') return await _parseB3DM(buffer, gltfLoader);
+      if (magic === 'glTF') return await _parseGLB(buffer, gltfLoader);
+      throw new Error(`未対応フォーマット: "${magic}"`);
+    } catch (e) {
+      if (window.debugLog) window.debugLog('PLATEAU', `タイルスキップ: ${e.message}`, 'warn');
+      return null;
+    }
+  }
+
+  async function loadPLATEAUBuildings(scene, camera, renderer, onProgress) {
+    if (!window.THREE || !window.THREE.GLTFLoader) {
+      throw new Error('GLTFLoader が読み込まれていません');
+    }
+    const gltfLoader = new THREE.GLTFLoader();
     const localFrame = buildECEFtoLocalMatrix();
     const errors     = [];
 
-    for (const url of PLATEAU_CANDIDATES) {
-      const label = url.split('/').slice(-4, -1).join('/');
+    for (const tilesetUrl of PLATEAU_CANDIDATES) {
+      const label = tilesetUrl.split('/').slice(-4, -1).join('/');
       try {
         if (onProgress) onProgress(`PLATEAU データ取得中: ${label}…`);
         if (window.debugLog) window.debugLog('PLATEAU', `試行: ${label}`, 'info');
 
-        const tr = new TilesRenderer(url);
-
-        // Draco 圧縮 GLTF に対応
-        if (GLTFExtensionsPlugin) {
-          const DracoLib = window.THREE_DRACOLoader || window.DRACOLoader;
-          if (DracoLib) {
-            const draco = new DracoLib();
-            draco.setDecoderPath(
-              'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/draco/',
-            );
-            tr.registerPlugin(new GLTFExtensionsPlugin({ dracoLoader: draco }));
-          }
-        }
-
-        tr.setCamera(camera);
-        tr.setResolutionFromRenderer(camera, renderer);
-
-        // ECEF → ローカル変換をグループ行列に設定
-        tr.group.matrix.copy(localFrame);
-        tr.group.matrixAutoUpdate = false;
-
-        scene.add(tr.group);
-
-        // tileset.json が読み込まれるまで最大 8 秒待機
-        await Promise.race([
-          new Promise(resolve => {
-            tr.addEventListener('load-tile-set', resolve, { once: true });
-          }),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('tileset 取得タイムアウト (8s)')), 8000),
+        // 1. tileset.json を取得（タイムアウト付き）
+        const tilesetRes = await Promise.race([
+          fetch(tilesetUrl),
+          new Promise((_, rej) =>
+            setTimeout(() => rej(new Error('tileset.json タイムアウト (8s)')), 8000),
           ),
         ]);
+        if (!tilesetRes.ok) throw new Error(`HTTP ${tilesetRes.status}`);
+        const tileset = await tilesetRes.json();
 
-        console.log('[PLATEAU] 読み込み成功:', url);
-        if (window.debugLog) window.debugLog('PLATEAU', `✓ tileset.json 取得: ${label}`, 'ok');
-        return tr; // 成功したらリターン
+        if (window.debugLog) window.debugLog('PLATEAU', `tileset.json 取得成功: ${label}`, 'ok');
+
+        // 2. コンテンツ URL を収集 (depth ≤ 1 に限定)
+        const tiles = [];
+        _collectTiles(tileset.root, tilesetUrl, new THREE.Matrix4(), tiles, 0, 1);
+
+        if (window.debugLog)
+          window.debugLog('PLATEAU', `タイル収集: ${tiles.length} 件`, 'info');
+
+        // 3. タイルを並列ロード（最大 20 件）
+        const limited = tiles.slice(0, 20);
+        const results = await Promise.all(
+          limited.map(({ url, transform }) =>
+            _loadTile(url, gltfLoader).then(obj => ({ obj, transform })),
+          ),
+        );
+
+        // 4. シーンに追加
+        let added = 0;
+        const group = new THREE.Group();
+        group.matrix.copy(localFrame);
+        group.matrixAutoUpdate = false;
+
+        results.forEach(({ obj, transform }) => {
+          if (!obj) return;
+          obj.applyMatrix4(transform);
+          group.add(obj);
+          added++;
+        });
+
+        scene.add(group);
+
+        console.log('[PLATEAU] 読み込み成功:', label, '/ 追加:', added);
+        if (window.debugLog)
+          window.debugLog('PLATEAU', `✓ 建物追加: ${added} / ${limited.length} タイル`, 'ok');
+        return; // 成功したら終了
 
       } catch (e) {
         console.warn('[PLATEAU] 失敗:', label, '—', e.message);
