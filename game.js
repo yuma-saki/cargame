@@ -703,22 +703,37 @@
     update(dt);
     updateMapView(dt);
     updateCamera();
+    // PLATEAU タイル LOD 更新（カメラ距離に応じてタイルを切替）
+    if (_plateauRenderer) _plateauRenderer.update();
     renderer.render(scene, camera);
   }
 
   // ================================================================
-  // 非同期初期化 — OSM データ取得
+  // 非同期初期化 — PLATEAU 建物 + OSM 道路
   // ================================================================
+  let _plateauRenderer = null; // レンダーループで update() するために保持
+
   async function init() {
+
+    // 1. PLATEAU 建物 3D Tiles
     try {
-      setLoading('地図データを取得中 (Overpass API)…');
-      const osmData = await MapModule.fetchOSMData(setLoading);
-
-      setLoading('道路・建物を構築中…');
-      MapModule.buildOSMScene(scene, osmData, setLoading);
-
+      setLoading('PLATEAU データを検索中…');
+      _plateauRenderer = await MapModule.loadPLATEAUBuildings(
+        scene, camera, renderer, setLoading,
+      );
     } catch (err) {
-      console.warn('[OSM] 取得失敗。フォールバック環境を使用します:', err.message);
+      console.warn('[PLATEAU] 建物データ取得失敗:', err.message);
+      setLoading('PLATEAU 取得失敗 — フォールバック中…');
+      // PLATEAU なしで続行（道路のみでもゲームは動く）
+    }
+
+    // 2. OSM 道路データ (暫定 / 将来 PLATEAU 交通モデルへ移行)
+    try {
+      setLoading('道路データを取得中 (OpenStreetMap)…');
+      const roadData = await MapModule.fetchRoadData(setLoading);
+      MapModule.buildRoads(scene, roadData, setLoading);
+    } catch (err) {
+      console.warn('[OSM] 道路データ取得失敗:', err.message);
       buildFallbackEnvironment();
     }
 
