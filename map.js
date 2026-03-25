@@ -54,14 +54,42 @@ const MapModule = (function () {
   // URL 形式の例 (年度・都市コードにより異なる):
   //   https://plateau.geospatial.jp/opt/{city-code}-{city-name}-{year}/bldg/tileset.json
   // ================================================================
-  const PLATEAU_CANDIDATES = [
-    // 西原町 (47213) — データが公開され次第 URL を確定してください
-    'https://plateau.geospatial.jp/opt/47213_nishihara-town_2023_bldg_2_op/tileset.json',
-    // フォールバック: 那覇市 (47201)
-    'https://plateau.geospatial.jp/opt/47201_naha-city_2023_bldg_2_op/tileset.json',
-    // フォールバック: 沖縄市 (47211)
-    'https://plateau.geospatial.jp/opt/47211_okinawa-city_2022_bldg_2_op/tileset.json',
-  ];
+  // 沖縄県の対象市町村コード (PLATEAU データカタログ検索用)
+  const PLATEAU_CITY_CODES = ['47201', '47211', '47213'];
+
+  /**
+   * PLATEAU データカタログ API から沖縄県建物 3D Tiles の
+   * tileset.json URL を動的に取得する。
+   * API が使えない場合は空配列を返す。
+   */
+  async function fetchPLATEAUCandidates() {
+    try {
+      const res = await Promise.race([
+        fetch('https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets'),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000)),
+      ]);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const datasets = await res.json();
+
+      const candidates = [];
+      (Array.isArray(datasets) ? datasets : (datasets.datasets || [])).forEach(ds => {
+        const cityCode = String(ds.cityCode || ds.city_code || '');
+        if (!PLATEAU_CITY_CODES.some(c => cityCode.startsWith(c))) return;
+        // 建物 (bldg) データセットのみ
+        const items = ds.items || ds.data || [];
+        items.forEach(item => {
+          const type = String(item.type || item.datasetType || '');
+          if (type.toLowerCase().includes('bldg') || type.toLowerCase().includes('building')) {
+            const url = item.url || item.tileset_url || '';
+            if (url.endsWith('tileset.json')) candidates.push(url);
+          }
+        });
+      });
+      return candidates;
+    } catch (_) {
+      return [];
+    }
+  }
 
   // ================================================================
   // ECEF → ENU ローカル座標変換行列
@@ -217,7 +245,24 @@ const MapModule = (function () {
     const localFrame = buildECEFtoLocalMatrix();
     const errors     = [];
 
-    for (const tilesetUrl of PLATEAU_CANDIDATES) {
+    // PLATEAU データカタログ API から動的に URL を取得
+    if (onProgress) onProgress('PLATEAU カタログ検索中…');
+    if (window.debugLog) window.debugLog('PLATEAU', 'データカタログ API を照会中…', 'info');
+    const dynamicCandidates = await fetchPLATEAUCandidates();
+    if (dynamicCandidates.length > 0) {
+      if (window.debugLog)
+        window.debugLog('PLATEAU', `カタログから ${dynamicCandidates.length} 件取得`, 'ok');
+    } else {
+      if (window.debugLog)
+        window.debugLog('PLATEAU', 'カタログ取得失敗 — 静的 URL にフォールバック', 'warn');
+    }
+
+    if (dynamicCandidates.length === 0) {
+      throw new Error('データカタログから利用可能な PLATEAU データが見つかりませんでした');
+    }
+    const allCandidates = dynamicCandidates;
+
+    for (const tilesetUrl of allCandidates) {
       const label = tilesetUrl.split('/').slice(-4, -1).join('/');
       try {
         if (onProgress) onProgress(`PLATEAU データ取得中: ${label}…`);
@@ -377,6 +422,91 @@ const MapModule = (function () {
   }
 
   // ================================================================
+  // プロシージャル建物 (PLATEAU 取得失敗時のフォールバック)
+  // 西原マリンパーク周辺のコース沿いに簡易建物を配置
+  // ================================================================
+  function buildProceduralBuildings(scene) {
+    // 建物の素材 (沖縄コンクリート風カラー)
+    const mats = [
+      new THREE.MeshLambertMaterial({ color: 0xd6cfc4 }),  // コンクリート
+      new THREE.MeshLambertMaterial({ color: 0xbfb8ad }),  // 薄茶
+      new THREE.MeshLambertMaterial({ color: 0xe8e0d5 }),  // 白系
+      new THREE.MeshLambertMaterial({ color: 0xc8bfb4 }),  // グレー
+      new THREE.MeshLambertMaterial({ color: 0xd4c9a8 }),  // 砂色
+    ];
+    const roofMat = new THREE.MeshLambertMaterial({ color: 0x8a9070 });
+
+    // シード付き疑似乱数 (再現性を保つ)
+    let _seed = 12345;
+    function rnd() {
+      _seed = (_seed * 1664525 + 1013904223) & 0xffffffff;
+      return ((_seed >>> 0) / 0xffffffff);
+    }
+
+    // コース中心付近に市街ブロックを配置
+    // COURSE_WAYPOINTS の重心をベース座標とする
+    const cx = COURSE_WAYPOINTS.reduce((s, p) => s + p.x, 0) / COURSE_WAYPOINTS.length;
+    const cz = COURSE_WAYPOINTS.reduce((s, p) => s + p.z, 0) / COURSE_WAYPOINTS.length;
+
+    // コースの AABB を取得
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    COURSE_WAYPOINTS.forEach(p => {
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+    });
+    const spanX = maxX - minX + 200;
+    const spanZ = maxZ - minZ + 200;
+
+    // グリッド間隔
+    const GRID_STEP  = 35;
+    const ROAD_CLEAR = 18; // 道路中心からこの距離以内はスキップ
+
+    const group = new THREE.Group();
+    let count = 0;
+
+    for (let gi = -Math.ceil(spanX / 2 / GRID_STEP); gi <= Math.ceil(spanX / 2 / GRID_STEP); gi++) {
+      for (let gj = -Math.ceil(spanZ / 2 / GRID_STEP); gj <= Math.ceil(spanZ / 2 / GRID_STEP); gj++) {
+        const bx = cx + gi * GRID_STEP + (rnd() - 0.5) * 10;
+        const bz = cz + gj * GRID_STEP + (rnd() - 0.5) * 10;
+
+        // コースウェイポイントに近すぎる場所はスキップ
+        let tooClose = false;
+        for (const wp of COURSE_WAYPOINTS) {
+          const dx = bx - wp.x, dz = bz - wp.z;
+          if (dx * dx + dz * dz < ROAD_CLEAR * ROAD_CLEAR) { tooClose = true; break; }
+        }
+        if (tooClose) continue;
+
+        // 建物サイズ
+        const w = 6 + rnd() * 18;
+        const d = 6 + rnd() * 18;
+        const h = 4 + rnd() * (rnd() > 0.85 ? 30 : 12); // たまに高層
+
+        // 本体
+        const geo  = new THREE.BoxGeometry(w, h, d);
+        const mesh = new THREE.Mesh(geo, mats[Math.floor(rnd() * mats.length)]);
+        mesh.position.set(bx, h / 2, bz);
+        mesh.castShadow    = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+
+        // 屋上パラペット
+        const roofGeo  = new THREE.BoxGeometry(w + 0.4, 0.5, d + 0.4);
+        const roofMesh = new THREE.Mesh(roofGeo, roofMat);
+        roofMesh.position.set(bx, h + 0.25, bz);
+        group.add(roofMesh);
+
+        count++;
+      }
+    }
+
+    scene.add(group);
+    if (window.debugLog)
+      window.debugLog('BUILD', `プロシージャル建物生成: ${count} 棟`, 'ok');
+    return count;
+  }
+
+  // ================================================================
   // Public API
   // ================================================================
   return {
@@ -384,6 +514,7 @@ const MapModule = (function () {
     COURSE_WAYPOINTS,
     ORIGIN,
     loadPLATEAUBuildings,
+    buildProceduralBuildings,
     fetchRoadData,
     buildRoads,
   };

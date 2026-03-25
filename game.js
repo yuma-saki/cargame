@@ -780,7 +780,9 @@
     } catch (err) {
       debugLog('PLATEAU', `全ソース失敗 — ${err.message}`, 'error');
       _setStatus('debug-status-plateau', 'PLATEAU: ✗', 'fail');
-      setLoading('PLATEAU 取得失敗 — フォールバック中…');
+      setLoading('PLATEAU 取得失敗 — プロシージャル建物を生成中…');
+      const n = MapModule.buildProceduralBuildings(scene);
+      debugLog('BUILD', `フォールバック建物 ${n} 棟配置`, 'warn');
     }
 
     // 2. OSM 道路データ
