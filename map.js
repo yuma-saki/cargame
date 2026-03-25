@@ -3,20 +3,19 @@
 /**
  * MapModule — PLATEAU + OSM 地図モジュール
  *
- * 建物: Project PLATEAU 3D Tiles (国土交通省)
- *   - `3d-tiles-renderer` ライブラリで ECEF 座標系から ENU ローカル座標へ変換
- *   - G空間情報センター / plateau.geospatial.jp から tileset.json を取得
- *   - 対象 URL は PLATEAU_CANDIDATES を参照・更新してください
- *     https://www.geospatial.jp/ckan/dataset?q=plateau+沖縄
+ * 建物: Project PLATEAU 3D Tiles (国土交通省) — 那覇市 (47201) 2020年度
+ *   - PLATEAU データカタログ API から tileset.json URL を動的取得
+ *   - 取得失敗時はプロシージャル建物にフォールバック
+ *   - データ参照: https://www.geospatial.jp/ckan/dataset/plateau-47201-naha-shi-2020
  *
- * 道路: OpenStreetMap (Overpass API)  ※暫定。将来 PLATEAU 交通モデルへ移行予定
+ * 道路: OpenStreetMap (Overpass API)
  */
 const MapModule = (function () {
 
   // ================================================================
-  // 座標変換 — 原点: 西原マリンパーク付近
+  // 座標変換 — 原点: 那覇若狭地区 (那覇港北岸)
   // ================================================================
-  const ORIGIN = { lat: 26.2290, lng: 127.7980 };
+  const ORIGIN = { lat: 26.2165, lng: 127.6560 };
   const LAT_M  = 111000;
   const LNG_M  = 111000 * Math.cos(ORIGIN.lat * Math.PI / 180);
 
@@ -29,66 +28,100 @@ const MapModule = (function () {
   }
 
   // ================================================================
-  // コース 1「港周回」ウェイポイント
+  // コース 1「那覇若狭サーキット」ウェイポイント
+  // 那覇港北側〜若狭地区を周回するストリートサーキット
   // ================================================================
   const COURSE_LATLON = [
-    [26.2318, 127.7970],
-    [26.2328, 127.7988],
-    [26.2320, 127.8005],
-    [26.2305, 127.8015],
-    [26.2288, 127.8010],
-    [26.2274, 127.7995],
-    [26.2268, 127.7975],
-    [26.2278, 127.7960],
-    [26.2295, 127.7955],
-    [26.2310, 127.7963],
+    [26.2175, 127.6520],  // スタート/フィニッシュ (西直線)
+    [26.2205, 127.6530],  // 北西コーナー
+    [26.2230, 127.6560],  // 北ヘアピン
+    [26.2225, 127.6600],  // 北東直線
+    [26.2200, 127.6640],  // 東セクション
+    [26.2165, 127.6650],  // 東ヘアピン
+    [26.2130, 127.6630],  // 南東コーナー
+    [26.2110, 127.6590],  // 南ヘアピン
+    [26.2125, 127.6550],  // 南西直線
+    [26.2155, 127.6525],  // 最終コーナー
   ];
   const COURSE_WAYPOINTS = COURSE_LATLON.map(([lat, lng]) => project(lat, lng));
 
   // ================================================================
-  // PLATEAU 3D Tiles 設定
+  // PLATEAU 3D Tiles 設定 — 那覇市 (47201)
   //
-  // G空間情報センターで対象都市の tileset.json URL を確認してください:
-  //   https://www.geospatial.jp/ckan/dataset?q=plateau+西原+沖縄
-  //
-  // URL 形式の例 (年度・都市コードにより異なる):
-  //   https://plateau.geospatial.jp/opt/{city-code}-{city-name}-{year}/bldg/tileset.json
+  // 無料公開データ:
+  //   https://www.geospatial.jp/ckan/dataset/plateau-47201-naha-shi-2020
+  // tileset.json URL は PLATEAU データカタログ API から動的取得:
+  //   https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets
   // ================================================================
-  // 沖縄県の対象市町村コード (PLATEAU データカタログ検索用)
-  const PLATEAU_CITY_CODES = ['47201', '47211', '47213'];
+  const PLATEAU_CITY_CODES = ['47201'];  // 那覹市のみ (確実にデータが存在)
 
   /**
-   * PLATEAU データカタログ API から沖縄県建物 3D Tiles の
-   * tileset.json URL を動的に取得する。
-   * API が使えない場合は空配列を返す。
+   * PLATEAU データカタログ API から那覹市建物 3D Tiles の
+   * tileset.json URL を動的に取得する。複数エンドポイントを試行。
+   * すべて失敗した場合は空配列を返す。
    */
   async function fetchPLATEAUCandidates() {
-    try {
-      const res = await Promise.race([
-        fetch('https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets'),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000)),
-      ]);
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const datasets = await res.json();
+    const TIMEOUT_MS = 8000;
+    const race = (url, init) => Promise.race([
+      fetch(url, init),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), TIMEOUT_MS)),
+    ]);
 
-      const candidates = [];
-      (Array.isArray(datasets) ? datasets : (datasets.datasets || [])).forEach(ds => {
-        const cityCode = String(ds.cityCode || ds.city_code || '');
-        if (!PLATEAU_CITY_CODES.some(c => cityCode.startsWith(c))) return;
-        // 建物 (bldg) データセットのみ
-        const items = ds.items || ds.data || [];
-        items.forEach(item => {
-          const type = String(item.type || item.datasetType || '');
-          if (type.toLowerCase().includes('bldg') || type.toLowerCase().includes('building')) {
-            const url = item.url || item.tileset_url || '';
-            if (url.endsWith('tileset.json')) candidates.push(url);
-          }
-        });
+    // --- 試行 1: REST API (全件取得 → 市コードでフィルタ) ---
+    try {
+      const res = await race('https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets');
+      if (res.ok) {
+        const datasets = await res.json();
+        const found = _extractBldgUrls(Array.isArray(datasets) ? datasets : (datasets.datasets || []));
+        if (found.length > 0) return found;
+      }
+    } catch (_) { /* 次を試す */ }
+
+    // --- 試行 2: GraphQL API ---
+    try {
+      const query = `{datasets(input:{cityCode:"47201",type:"bldg"}){items{id name url}}}`;
+      const res   = await race('https://api.plateauview.mlit.go.jp/datacatalog/graphql', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ query }),
       });
-      return candidates;
-    } catch (_) {
-      return [];
-    }
+      if (res.ok) {
+        const body  = await res.json();
+        const items = (body.data && body.data.datasets && body.data.datasets.items) || [];
+        const urls  = items.map(i => i.url).filter(u => u && u.endsWith('tileset.json'));
+        if (urls.length > 0) return urls;
+      }
+    } catch (_) { /* 次を試す */ }
+
+    // --- 試行 3: REST API with cityCode parameter ---
+    try {
+      const res = await race('https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets?cityCode=47201');
+      if (res.ok) {
+        const datasets = await res.json();
+        const found = _extractBldgUrls(Array.isArray(datasets) ? datasets : (datasets.datasets || []));
+        if (found.length > 0) return found;
+      }
+    } catch (_) { /* 諦める */ }
+
+    return [];
+  }
+
+  /** データセット配列から那覹市建物 tileset.json URL を抽出 */
+  function _extractBldgUrls(datasets) {
+    const urls = [];
+    datasets.forEach(ds => {
+      const cityCode = String(ds.cityCode || ds.city_code || ds.code || '');
+      if (!PLATEAU_CITY_CODES.some(c => cityCode.startsWith(c))) return;
+      const items = ds.items || ds.data || [];
+      items.forEach(item => {
+        const type = String(item.type || item.datasetType || '').toLowerCase();
+        if (type.includes('bldg') || type.includes('building')) {
+          const url = item.url || item.tileset_url || '';
+          if (url.endsWith('tileset.json')) urls.push(url);
+        }
+      });
+    });
+    return urls;
   }
 
   // ================================================================
@@ -329,7 +362,8 @@ const MapModule = (function () {
   // 道路データ取得 (OpenStreetMap / Overpass API)
   // ※ PLATEAU 道路 CityGML のブラウザリアルタイム解析が困難なため暫定使用
   // ================================================================
-  const ROAD_BBOX = { south: 26.218, west: 127.782, north: 26.248, east: 127.815 };
+  // 那覹市若狭〜港周辺 (コース + 周囲 ~1km)
+  const ROAD_BBOX = { south: 26.198, west: 127.638, north: 26.232, east: 127.675 };
 
   async function fetchRoadData(onProgress) {
     if (onProgress) onProgress('道路データ取得中 (OpenStreetMap)…');
