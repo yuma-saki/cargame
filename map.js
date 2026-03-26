@@ -345,17 +345,30 @@ const MapModule = (function () {
         );
 
         // 4. シーンに追加
+        // ※ group.matrix に localFrame をセットする方式は matrixWorldNeedsUpdate が
+        //   立たないため matrixWorld = identity のまま描画される (ECEF 数百万 m 先に配置)。
+        //   各オブジェクトに全変換を直接 bake して group はコンテナとして使う。
         let added = 0;
         const group = new THREE.Group();
-        group.matrix.copy(localFrame);
-        group.matrixAutoUpdate = false;
 
         results.forEach(({ obj, transform }) => {
           if (!obj) return;
+          // obj.matrix には _parseB3DM で rtcMatrix が入っている (RTC_CENTER 平行移動)
+          // applyMatrix4 は premultiply なので順序:
+          //   applyMatrix4(transform)  → obj.matrix = tileWorldMatrix × rtcMatrix  (ECEF)
+          //   applyMatrix4(localFrame) → obj.matrix = localFrame × tileWorldMatrix × rtcMatrix (ENU)
           obj.applyMatrix4(transform);
+          obj.applyMatrix4(localFrame);
           group.add(obj);
           added++;
         });
+
+        // 位置デバッグ: 先頭オブジェクトの ENU 座標をログ出力
+        const _first = results.find(r => r.obj);
+        if (_first && window.debugLog) {
+          const p = _first.obj.position;
+          window.debugLog('PLATEAU', `建物 ENU (${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)}) m`, 'info');
+        }
 
         scene.add(group);
 

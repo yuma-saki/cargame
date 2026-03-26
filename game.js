@@ -76,7 +76,7 @@
       const msg = (row.querySelector('.de-msg') || {}).textContent || '';
       return `${ts} ${tag} ${msg}`;
     }).join('\n');
-    const full = `=== リアルカーレース DEV LOG (v0.4) ===\n${new Date().toISOString()}\n\n${text}\n`;
+    const full = `=== リアルカーレース DEV LOG (v0.5) ===\n${new Date().toISOString()}\n\n${text}\n`;
     navigator.clipboard.writeText(full).then(() => {
       const btn = document.getElementById('debug-copy');
       const orig = btn.textContent;
