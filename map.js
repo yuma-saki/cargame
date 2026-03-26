@@ -441,7 +441,6 @@ const MapModule = (function () {
             obj.applyMatrix4(transform);
             obj.applyMatrix4(localFrame);
           }
-          }
           group.add(obj);
           added++;
         });
