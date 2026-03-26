@@ -67,6 +67,36 @@
   });
   document.getElementById('debug-close').addEventListener('click', () => _toggleDebug(false));
 
+  // 📋 ログをテキストでクリップボードにコピー
+  document.getElementById('debug-copy').addEventListener('click', () => {
+    const rows = Array.from(_dbgEntries.querySelectorAll('.de'));
+    const text = rows.map(row => {
+      const ts  = (row.querySelector('.de-ts')  || {}).textContent || '';
+      const tag = (row.querySelector('.de-tag') || {}).textContent || '';
+      const msg = (row.querySelector('.de-msg') || {}).textContent || '';
+      return `${ts} ${tag} ${msg}`;
+    }).join('\n');
+    const full = `=== リアルカーレース DEV LOG (v0.3) ===\n${new Date().toISOString()}\n\n${text}\n`;
+    navigator.clipboard.writeText(full).then(() => {
+      const btn = document.getElementById('debug-copy');
+      const orig = btn.textContent;
+      btn.textContent = '✓ コピー完了';
+      setTimeout(() => { btn.textContent = orig; }, 2000);
+    }).catch(() => {
+      // clipboard API が使えない場合は textarea で選択させる
+      const ta = document.createElement('textarea');
+      ta.value = full;
+      ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      const btn = document.getElementById('debug-copy');
+      btn.textContent = '✓ コピー完了';
+      setTimeout(() => { btn.textContent = '📋 コピー'; }, 2000);
+    });
+  });
+
   // ================================================================
   // THREE.js シーン
   // ================================================================

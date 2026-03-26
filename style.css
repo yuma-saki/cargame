@@ -53,8 +53,22 @@
 .ds-fail    { background: rgba(200,40,40,0.25);  color: #ff7766; border: 1px solid rgba(220,60,40,0.35); }
 .ds-warn    { background: rgba(200,150,0,0.25);  color: #ffcc44; border: 1px solid rgba(220,170,0,0.35); }
 
-#debug-close {
+#debug-copy {
   margin-left: auto;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 10px;
+  padding: 2px 7px;
+  line-height: 1.6;
+  font-family: monospace;
+  transition: background 0.15s, color 0.15s;
+}
+#debug-copy:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+#debug-close {
   color: #666;
   cursor: pointer;
   font-size: 13px;
