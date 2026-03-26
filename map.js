@@ -286,6 +286,17 @@ const MapModule = (function () {
       throw new Error('GLTFLoader が読み込まれていません');
     }
     const gltfLoader = new THREE.GLTFLoader();
+    // PLATEAU の GLB は Draco 圧縮されているため DRACOLoader が必須
+    if (window.THREE.DRACOLoader) {
+      const dracoLoader = new THREE.DRACOLoader();
+      dracoLoader.setDecoderPath(
+        'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/libs/draco/',
+      );
+      gltfLoader.setDRACOLoader(dracoLoader);
+      if (window.debugLog) window.debugLog('PLATEAU', 'DRACOLoader 設定完了', 'ok');
+    } else {
+      if (window.debugLog) window.debugLog('PLATEAU', 'DRACOLoader 未読み込み', 'warn');
+    }
     const localFrame = buildECEFtoLocalMatrix();
     const errors     = [];
 
