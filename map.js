@@ -229,17 +229,48 @@ const MapModule = (function () {
     const btJSONLen = view.getUint32(20, true);
     const btBinLen  = view.getUint32(24, true);
 
+    if (window.debugLog) {
+      window.debugLog('B3DM', `ftJSONLen=${ftJSONLen} ftBinLen=${ftBinLen} btJSONLen=${btJSONLen} btBinLen=${btBinLen}`, 'info');
+    }
+
     // RTC_CENTER 抽出（タイル内 GLB 頂点の相対中心）
+    // RTC_CENTER はインライン配列 [x,y,z] またはバイナリ参照 {"byteOffset":N} の両形式がある
     let rtcMatrix = null;
     if (ftJSONLen > 0) {
       try {
         const ftText = new TextDecoder().decode(new Uint8Array(buffer, 28, ftJSONLen));
+        if (window.debugLog) {
+          window.debugLog('B3DM', `ftJSON: ${ftText.trim().substring(0, 120)}`, 'info');
+        }
         const ftJSON = JSON.parse(ftText);
+        let rtcCenter = null;
+
         if (Array.isArray(ftJSON.RTC_CENTER) && ftJSON.RTC_CENTER.length === 3) {
-          const [cx, cy, cz] = ftJSON.RTC_CENTER;
+          // インライン形式: RTC_CENTER: [x, y, z]
+          rtcCenter = ftJSON.RTC_CENTER;
+          if (window.debugLog) window.debugLog('B3DM', `RTC_CENTER インライン: [${rtcCenter.map(v => v.toFixed(0)).join(', ')}]`, 'ok');
+        } else if (ftJSON.RTC_CENTER && typeof ftJSON.RTC_CENTER.byteOffset === 'number') {
+          // バイナリ参照形式: RTC_CENTER: {"byteOffset": N} → feature table binary に 3×float64
+          const ftBinaryStart = 28 + ftJSONLen;
+          const dataOffset    = ftBinaryStart + ftJSON.RTC_CENTER.byteOffset;
+          const dv = new DataView(buffer);
+          rtcCenter = [
+            dv.getFloat64(dataOffset,      true),  // little-endian
+            dv.getFloat64(dataOffset +  8, true),
+            dv.getFloat64(dataOffset + 16, true),
+          ];
+          if (window.debugLog) window.debugLog('B3DM', `RTC_CENTER バイナリ@${dataOffset}: [${rtcCenter.map(v => v.toFixed(0)).join(', ')}]`, 'ok');
+        } else {
+          if (window.debugLog) window.debugLog('B3DM', 'RTC_CENTER なし', 'warn');
+        }
+
+        if (rtcCenter && rtcCenter.length === 3) {
+          const [cx, cy, cz] = rtcCenter;
           rtcMatrix = new THREE.Matrix4().makeTranslation(cx, cy, cz);
         }
-      } catch (_) { /* JSON パース失敗は無視 */ }
+      } catch (e) {
+        if (window.debugLog) window.debugLog('B3DM', `ftJSON パース失敗: ${e.message}`, 'error');
+      }
     }
 
     const glbStart  = 28 + ftJSONLen + ftBinLen + btJSONLen + btBinLen;
