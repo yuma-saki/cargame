@@ -402,20 +402,36 @@ const MapModule = (function () {
         );
 
         // 4. シーンに追加
-        // ※ group.matrix に localFrame をセットする方式は matrixWorldNeedsUpdate が
-        //   立たないため matrixWorld = identity のまま描画される (ECEF 数百万 m 先に配置)。
-        //   各オブジェクトに全変換を直接 bake して group はコンテナとして使う。
+        // 座標系を自動判定:
+        //   - 頂点中心の絶対値 < 100km → ローカルENU (既にゲーム座標系)
+        //   - 頂点中心の絶対値 ≥ 100km → ECEF絶対座標 → localFrame変換が必要
         let added = 0;
         const group = new THREE.Group();
 
+        // サンプルタイルで座標系を判定
+        const _sampleR = results.find(r => r.obj);
+        let _isLocalENU = false;
+        if (_sampleR && _sampleR.obj) {
+          const _sbb = new THREE.Box3().setFromObject(_sampleR.obj);
+          if (!_sbb.isEmpty()) {
+            const _sc = _sbb.getCenter(new THREE.Vector3());
+            const _mag = Math.max(Math.abs(_sc.x), Math.abs(_sc.y), Math.abs(_sc.z));
+            _isLocalENU = _mag < 100000;
+            if (window.debugLog) {
+              window.debugLog('PLATEAU', `座標系: ${_isLocalENU ? 'ローカルENU' : 'ECEF'} (mag=${_mag.toFixed(0)} m)`, _isLocalENU ? 'ok' : 'info');
+            }
+          }
+        }
+
         results.forEach(({ obj, transform }) => {
           if (!obj) return;
-          // obj.matrix には _parseB3DM で rtcMatrix が入っている (RTC_CENTER 平行移動)
-          // applyMatrix4 は premultiply なので順序:
-          //   applyMatrix4(transform)  → obj.matrix = tileWorldMatrix × rtcMatrix  (ECEF)
-          //   applyMatrix4(localFrame) → obj.matrix = localFrame × tileWorldMatrix × rtcMatrix (ENU)
-          obj.applyMatrix4(transform);
-          obj.applyMatrix4(localFrame);
+          if (_isLocalENU) {
+            // 頂点はすでにゲームのENU座標系にある → 変換不要
+          } else {
+            // 頂点は ECEF 絶対座標 → タイル変換 → ゲームENU変換
+            obj.applyMatrix4(transform);
+            obj.applyMatrix4(localFrame);
+          }
           group.add(obj);
           added++;
         });
