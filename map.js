@@ -57,71 +57,82 @@ const MapModule = (function () {
 
   /**
    * PLATEAU データカタログ API から那覹市建物 3D Tiles の
-   * tileset.json URL を動的に取得する。複数エンドポイントを試行。
-   * すべて失敗した場合は空配列を返す。
+   * tileset.json URL を動的に取得する。3 段階フォールバック。
+   *
+   * REST API レスポンス構造 (フラット配列):
+   *   [ { city_code, type_en, url, format, lod, ... }, ... ]
+   *   - city_code : "47201" などの5桁市区町村コード
+   *   - type_en   : "bldg" など英語種別
+   *   - format    : "3D Tiles" または "MVT"
+   *   - url       : tileset.json URL (3D Tiles) または {z}/{x}/{y}.mvt (MVT)
    */
   async function fetchPLATEAUCandidates() {
-    const TIMEOUT_MS = 8000;
-    const race = (url, init) => Promise.race([
-      fetch(url, init),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), TIMEOUT_MS)),
+    const TIMEOUT_MS = 15000;  // 全件レスポンスは 2MB 超のため長めに設定
+    const _race = (url, init) => Promise.race([
+      fetch(url, Object.assign({ mode: 'cors' }, init)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + TIMEOUT_MS + 'ms')), TIMEOUT_MS)),
     ]);
 
-    // --- 試行 1: REST API (全件取得 → 市コードでフィルタ) ---
+    // --- 試行 1: GraphQL API (軽量 — 那覹市建物のみクエリ) ---
     try {
-      const res = await race('https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets');
-      if (res.ok) {
-        const datasets = await res.json();
-        const found = _extractBldgUrls(Array.isArray(datasets) ? datasets : (datasets.datasets || []));
-        if (found.length > 0) return found;
-      }
-    } catch (_) { /* 次を試す */ }
-
-    // --- 試行 2: GraphQL API ---
-    try {
-      const query = `{datasets(input:{cityCode:"47201",type:"bldg"}){items{id name url}}}`;
-      const res   = await race('https://api.plateauview.mlit.go.jp/datacatalog/graphql', {
+      if (window.debugLog) window.debugLog('PLATEAU-API', 'GraphQL 試行…', 'info');
+      // types は配列で渡す (GraphQL schema: [String!])
+      const query = `{datasets(input:{cityCode:"47201",types:["bldg"]}){id items{id name url}}}`;
+      const res   = await _race('https://api.plateauview.mlit.go.jp/datacatalog/graphql', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body:    JSON.stringify({ query }),
       });
+      if (window.debugLog) window.debugLog('PLATEAU-API', `GraphQL HTTP ${res.status}`, res.ok ? 'ok' : 'warn');
       if (res.ok) {
         const body  = await res.json();
-        const items = (body.data && body.data.datasets && body.data.datasets.items) || [];
+        const items = ((body.data || {}).datasets || []).flatMap(d => d.items || []);
         const urls  = items.map(i => i.url).filter(u => u && u.endsWith('tileset.json'));
+        if (window.debugLog) window.debugLog('PLATEAU-API', `GraphQL 結果: ${urls.length} 件`, urls.length ? 'ok' : 'warn');
         if (urls.length > 0) return urls;
       }
-    } catch (_) { /* 次を試す */ }
+    } catch (e) {
+      if (window.debugLog) window.debugLog('PLATEAU-API', `GraphQL 失敗: ${e.message}`, 'warn');
+    }
 
-    // --- 試行 3: REST API with cityCode parameter ---
+    // --- 試行 2: REST API (全件取得 → フィルタ) ---
     try {
-      const res = await race('https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets?cityCode=47201');
+      if (window.debugLog) window.debugLog('PLATEAU-API', 'REST 試行…', 'info');
+      const res = await _race('https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets');
+      if (window.debugLog) window.debugLog('PLATEAU-API', `REST HTTP ${res.status}`, res.ok ? 'ok' : 'warn');
       if (res.ok) {
-        const datasets = await res.json();
-        const found = _extractBldgUrls(Array.isArray(datasets) ? datasets : (datasets.datasets || []));
-        if (found.length > 0) return found;
+        const data = await res.json();
+        const arr  = Array.isArray(data) ? data : (data.datasets || data.data || []);
+        // 正しいフィールド名: city_code, type_en, format, url
+        const urls = arr
+          .filter(d => String(d.city_code || '').startsWith('47201')
+                    && String(d.type_en  || '').toLowerCase().includes('bldg')
+                    && String(d.format   || '').includes('3D Tiles'))
+          .map(d => d.url)
+          .filter(u => u && u.endsWith('tileset.json'));
+        if (window.debugLog) window.debugLog('PLATEAU-API', `REST 結果: ${urls.length} 件`, urls.length ? 'ok' : 'warn');
+        if (urls.length > 0) return urls;
+      }
+    } catch (e) {
+      if (window.debugLog) window.debugLog('PLATEAU-API', `REST 失敗: ${e.message}`, 'warn');
+    }
+
+    // --- 試行 3: REST API ?limit=200 で末尾のみ取得 ---
+    try {
+      const res = await _race('https://api.plateauview.mlit.go.jp/datacatalog/plateau-datasets?limit=200&offset=0');
+      if (res.ok) {
+        const data = await res.json();
+        const arr  = Array.isArray(data) ? data : (data.datasets || data.data || []);
+        const urls = arr
+          .filter(d => String(d.city_code || '').startsWith('47201')
+                    && String(d.type_en  || '').toLowerCase().includes('bldg'))
+          .map(d => d.url)
+          .filter(u => u && u.endsWith('tileset.json'));
+        if (urls.length > 0) return urls;
       }
     } catch (_) { /* 諦める */ }
 
     return [];
-  }
-
-  /** データセット配列から那覹市建物 tileset.json URL を抽出 */
-  function _extractBldgUrls(datasets) {
-    const urls = [];
-    datasets.forEach(ds => {
-      const cityCode = String(ds.cityCode || ds.city_code || ds.code || '');
-      if (!PLATEAU_CITY_CODES.some(c => cityCode.startsWith(c))) return;
-      const items = ds.items || ds.data || [];
-      items.forEach(item => {
-        const type = String(item.type || item.datasetType || '').toLowerCase();
-        if (type.includes('bldg') || type.includes('building')) {
-          const url = item.url || item.tileset_url || '';
-          if (url.endsWith('tileset.json')) urls.push(url);
-        }
-      });
-    });
-    return urls;
   }
 
   // ================================================================
@@ -282,17 +293,11 @@ const MapModule = (function () {
     if (onProgress) onProgress('PLATEAU カタログ検索中…');
     if (window.debugLog) window.debugLog('PLATEAU', 'データカタログ API を照会中…', 'info');
     const dynamicCandidates = await fetchPLATEAUCandidates();
-    if (dynamicCandidates.length > 0) {
-      if (window.debugLog)
-        window.debugLog('PLATEAU', `カタログから ${dynamicCandidates.length} 件取得`, 'ok');
-    } else {
-      if (window.debugLog)
-        window.debugLog('PLATEAU', 'カタログ取得失敗 — 静的 URL にフォールバック', 'warn');
-    }
-
     if (dynamicCandidates.length === 0) {
-      throw new Error('データカタログから利用可能な PLATEAU データが見つかりませんでした');
+      throw new Error('PLATEAU データカタログ API に接続できませんでした (CORS / ネットワークエラー)');
     }
+    if (window.debugLog)
+      window.debugLog('PLATEAU', `カタログから ${dynamicCandidates.length} 件取得`, 'ok');
     const allCandidates = dynamicCandidates;
 
     for (const tilesetUrl of allCandidates) {

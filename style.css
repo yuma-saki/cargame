@@ -663,3 +663,18 @@ body {
 #retry-btn:active {
   transform: scale(0.96);
 }
+
+/* ----------------------------------------------------------------
+   Version badge
+   ---------------------------------------------------------------- */
+#version-badge {
+  position: fixed;
+  bottom: 6px;
+  right: 8px;
+  font-family: monospace;
+  font-size: 10px;
+  color: rgba(255,255,255,0.45);
+  pointer-events: none;
+  z-index: 50;
+  letter-spacing: 0.05em;
+}
