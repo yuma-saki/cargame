@@ -403,34 +403,44 @@ const MapModule = (function () {
 
         // 4. シーンに追加
         // 座標系を自動判定:
-        //   - 頂点中心の絶対値 < 100km → ローカルENU (既にゲーム座標系)
-        //   - 頂点中心の絶対値 ≥ 100km → ECEF絶対座標 → localFrame変換が必要
+        //   - 頂点中心の絶対値 < 100km → ECEF相対座標 (原点付近にセンタリング済み)
+        //     → 回転のみ適用してENU軸に揃える (平行移動は不要)
+        //   - 頂点中心の絶対値 ≥ 100km → ECEF絶対座標 → localFrame全体を適用
         let added = 0;
         const group = new THREE.Group();
 
         // サンプルタイルで座標系を判定
         const _sampleR = results.find(r => r.obj);
-        let _isLocalENU = false;
+        let _isECEFRelative = false;
         if (_sampleR && _sampleR.obj) {
           const _sbb = new THREE.Box3().setFromObject(_sampleR.obj);
           if (!_sbb.isEmpty()) {
             const _sc = _sbb.getCenter(new THREE.Vector3());
             const _mag = Math.max(Math.abs(_sc.x), Math.abs(_sc.y), Math.abs(_sc.z));
-            _isLocalENU = _mag < 100000;
+            _isECEFRelative = _mag < 100000;
             if (window.debugLog) {
-              window.debugLog('PLATEAU', `座標系: ${_isLocalENU ? 'ローカルENU' : 'ECEF'} (mag=${_mag.toFixed(0)} m)`, _isLocalENU ? 'ok' : 'info');
+              window.debugLog('PLATEAU', `座標系: ${_isECEFRelative ? 'ECEF相対 → 回転のみ適用' : 'ECEF絶対 → フル変換'} (mag=${_mag.toFixed(0)} m)`, 'info');
             }
           }
         }
 
+        // ECEF相対座標用: localFrameの回転部分のみ (平行移動ゼロ)
+        // これで ECEF ベクトルが ENU 軸 (X=East, Y=Up, Z=South) に変換される
+        const _rotFrame = localFrame.clone();
+        _rotFrame.elements[12] = 0;  // tx = 0
+        _rotFrame.elements[13] = 0;  // ty = 0
+        _rotFrame.elements[14] = 0;  // tz = 0
+
         results.forEach(({ obj, transform }) => {
           if (!obj) return;
-          if (_isLocalENU) {
-            // 頂点はすでにゲームのENU座標系にある → 変換不要
+          if (_isECEFRelative) {
+            // ECEF相対頂点: 回転のみでENU軸に整列 (平行移動はゼロ点が既に原点近く)
+            obj.applyMatrix4(_rotFrame);
           } else {
-            // 頂点は ECEF 絶対座標 → タイル変換 → ゲームENU変換
+            // ECEF絶対頂点: タイル変換 → ECEF→ENU
             obj.applyMatrix4(transform);
             obj.applyMatrix4(localFrame);
+          }
           }
           group.add(obj);
           added++;
