@@ -76,7 +76,7 @@
       const msg = (row.querySelector('.de-msg') || {}).textContent || '';
       return `${ts} ${tag} ${msg}`;
     }).join('\n');
-    const full = `=== リアルカーレース DEV LOG (v0.6) ===\n${new Date().toISOString()}\n\n${text}\n`;
+    const full = `=== リアルカーレース DEV LOG (v0.7) ===\n${new Date().toISOString()}\n\n${text}\n`;
     navigator.clipboard.writeText(full).then(() => {
       const btn = document.getElementById('debug-copy');
       const orig = btn.textContent;
@@ -112,7 +112,7 @@
   scene.fog        = new THREE.FogExp2(0x9fd8e8, 0.0035);
 
   const camera = new THREE.PerspectiveCamera(
-    60, window.innerWidth / window.innerHeight, 0.1, 1200,
+    60, window.innerWidth / window.innerHeight, 0.1, 8000,
   );
 
   window.addEventListener('resize', () => {

@@ -194,9 +194,21 @@ const MapModule = (function () {
    * depth > maxDepth に達したら子を無視（ブラウザ負荷軽減）。
    */
   function _collectTiles(tile, baseUrl, parentTransform, out, depth, maxDepth) {
-    const tileMatrix = tile.transform
+    const hasTf = Array.isArray(tile.transform) && tile.transform.length === 16;
+    const tileMatrix = hasTf
       ? new THREE.Matrix4().fromArray(tile.transform)
       : new THREE.Matrix4();
+
+    if (window.debugLog && depth <= 1) {
+      if (hasTf) {
+        // column-major: 平行移動は index 12,13,14
+        const t = tile.transform;
+        window.debugLog('TILESET', `depth=${depth} transform tx=(${t[12].toFixed(0)}, ${t[13].toFixed(0)}, ${t[14].toFixed(0)})`, 'info');
+      } else {
+        window.debugLog('TILESET', `depth=${depth} transform なし → identity`, 'warn');
+      }
+    }
+
     const worldMatrix = parentTransform.clone().multiply(tileMatrix);
 
     if (tile.content && tile.content.uri) {
@@ -279,6 +291,20 @@ const MapModule = (function () {
     return new Promise((resolve, reject) => {
       gltfLoader.parse(glbBuffer, '', gltf => {
         const root = gltf.scene;
+
+        // オブジェクト空間での頂点範囲をログ (変換前の座標系確認)
+        if (window.debugLog) {
+          const bb = new THREE.Box3().setFromObject(root);
+          if (!bb.isEmpty()) {
+            const c = bb.getCenter(new THREE.Vector3());
+            const s = bb.getSize(new THREE.Vector3());
+            window.debugLog('B3DM', `頂点中心(obj空間): (${c.x.toFixed(0)}, ${c.y.toFixed(0)}, ${c.z.toFixed(0)})`, 'info');
+            window.debugLog('B3DM', `頂点範囲(obj空間): ${s.x.toFixed(0)}×${s.y.toFixed(0)}×${s.z.toFixed(0)} m`, 'info');
+          } else {
+            window.debugLog('B3DM', '頂点なし (空メッシュ)', 'warn');
+          }
+        }
+
         if (rtcMatrix) root.applyMatrix4(rtcMatrix);
         resolve(root);
       }, reject);
@@ -394,14 +420,19 @@ const MapModule = (function () {
           added++;
         });
 
-        // 位置デバッグ: 先頭オブジェクトの ENU 座標をログ出力
-        const _first = results.find(r => r.obj);
-        if (_first && window.debugLog) {
-          const p = _first.obj.position;
-          window.debugLog('PLATEAU', `建物 ENU (${p.x.toFixed(0)}, ${p.y.toFixed(0)}, ${p.z.toFixed(0)}) m`, 'info');
-        }
-
         scene.add(group);
+
+        // ワールド空間でのバウンディングボックスを計算してログ出力
+        if (window.debugLog && added > 0) {
+          group.updateMatrixWorld(true);
+          const wBB = new THREE.Box3().setFromObject(group);
+          if (!wBB.isEmpty()) {
+            const wc = wBB.getCenter(new THREE.Vector3());
+            const ws = wBB.getSize(new THREE.Vector3());
+            window.debugLog('PLATEAU', `世界BBox中心: (${wc.x.toFixed(0)}, ${wc.y.toFixed(0)}, ${wc.z.toFixed(0)}) m`, 'info');
+            window.debugLog('PLATEAU', `世界BBoxサイズ: ${ws.x.toFixed(0)}×${ws.y.toFixed(0)}×${ws.z.toFixed(0)} m`, 'info');
+          }
+        }
 
         console.log('[PLATEAU] 読み込み成功:', label, '/ 追加:', added);
         if (window.debugLog)
