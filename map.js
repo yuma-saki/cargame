@@ -241,48 +241,30 @@ const MapModule = (function () {
     const btJSONLen = view.getUint32(20, true);
     const btBinLen  = view.getUint32(24, true);
 
-    if (window.debugLog) {
-      window.debugLog('B3DM', `ftJSONLen=${ftJSONLen} ftBinLen=${ftBinLen} btJSONLen=${btJSONLen} btBinLen=${btBinLen}`, 'info');
-    }
-
-    // RTC_CENTER 抽出（タイル内 GLB 頂点の相対中心）
-    // RTC_CENTER はインライン配列 [x,y,z] またはバイナリ参照 {"byteOffset":N} の両形式がある
     let rtcMatrix = null;
     if (ftJSONLen > 0) {
       try {
         const ftText = new TextDecoder().decode(new Uint8Array(buffer, 28, ftJSONLen));
-        if (window.debugLog) {
-          window.debugLog('B3DM', `ftJSON: ${ftText.trim().substring(0, 120)}`, 'info');
-        }
         const ftJSON = JSON.parse(ftText);
         let rtcCenter = null;
 
         if (Array.isArray(ftJSON.RTC_CENTER) && ftJSON.RTC_CENTER.length === 3) {
-          // インライン形式: RTC_CENTER: [x, y, z]
           rtcCenter = ftJSON.RTC_CENTER;
-          if (window.debugLog) window.debugLog('B3DM', `RTC_CENTER インライン: [${rtcCenter.map(v => v.toFixed(0)).join(', ')}]`, 'ok');
         } else if (ftJSON.RTC_CENTER && typeof ftJSON.RTC_CENTER.byteOffset === 'number') {
-          // バイナリ参照形式: RTC_CENTER: {"byteOffset": N} → feature table binary に 3×float64
-          const ftBinaryStart = 28 + ftJSONLen;
-          const dataOffset    = ftBinaryStart + ftJSON.RTC_CENTER.byteOffset;
+          const dataOffset = 28 + ftJSONLen + ftJSON.RTC_CENTER.byteOffset;
           const dv = new DataView(buffer);
           rtcCenter = [
-            dv.getFloat64(dataOffset,      true),  // little-endian
+            dv.getFloat64(dataOffset,      true),
             dv.getFloat64(dataOffset +  8, true),
             dv.getFloat64(dataOffset + 16, true),
           ];
-          if (window.debugLog) window.debugLog('B3DM', `RTC_CENTER バイナリ@${dataOffset}: [${rtcCenter.map(v => v.toFixed(0)).join(', ')}]`, 'ok');
-        } else {
-          if (window.debugLog) window.debugLog('B3DM', 'RTC_CENTER なし', 'warn');
         }
 
         if (rtcCenter && rtcCenter.length === 3) {
           const [cx, cy, cz] = rtcCenter;
           rtcMatrix = new THREE.Matrix4().makeTranslation(cx, cy, cz);
         }
-      } catch (e) {
-        if (window.debugLog) window.debugLog('B3DM', `ftJSON パース失敗: ${e.message}`, 'error');
-      }
+      } catch (_) { /* ignore */ }
     }
 
     const glbStart  = 28 + ftJSONLen + ftBinLen + btJSONLen + btBinLen;
@@ -291,20 +273,6 @@ const MapModule = (function () {
     return new Promise((resolve, reject) => {
       gltfLoader.parse(glbBuffer, '', gltf => {
         const root = gltf.scene;
-
-        // オブジェクト空間での頂点範囲をログ (変換前の座標系確認)
-        if (window.debugLog) {
-          const bb = new THREE.Box3().setFromObject(root);
-          if (!bb.isEmpty()) {
-            const c = bb.getCenter(new THREE.Vector3());
-            const s = bb.getSize(new THREE.Vector3());
-            window.debugLog('B3DM', `頂点中心(obj空間): (${c.x.toFixed(0)}, ${c.y.toFixed(0)}, ${c.z.toFixed(0)})`, 'info');
-            window.debugLog('B3DM', `頂点範囲(obj空間): ${s.x.toFixed(0)}×${s.y.toFixed(0)}×${s.z.toFixed(0)} m`, 'info');
-          } else {
-            window.debugLog('B3DM', '頂点なし (空メッシュ)', 'warn');
-          }
-        }
-
         if (rtcMatrix) root.applyMatrix4(rtcMatrix);
         resolve(root);
       }, reject);
